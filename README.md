@@ -94,6 +94,37 @@ Example with explicit serial settings:
 python d3net_rtu_tool.py --port /dev/ttyUSB0 --baudrate 9600 --bytesize 8 --parity E --stopbits 1 --slave 1 scan --verbose
 ```
 
+### Desktop UI (GUI)
+
+If you prefer a UI instead of CLI, run:
+
+```bash
+python d3net_rtu_gui.py
+```
+
+The UI includes:
+
+- serial setup and port discovery
+- unit scan
+- status reads
+- error/alert reads
+- control writes (power/mode/setpoint/fan/filter reset)
+- live watch/logging with optional JSONL output file
+
+### Build executable
+
+This repository includes `build_executable.sh` to package the GUI into a standalone executable using PyInstaller:
+
+```bash
+./build_executable.sh
+```
+
+Output binary will be created at:
+
+```bash
+dist/d3net_rtu_gui
+```
+
 ## Screens
 
 ![Integration](/images/integration.png)
