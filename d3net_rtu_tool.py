@@ -47,21 +47,22 @@ def _build_client(cfg: RtuConfig):
 
 
 def _read_input(client: Any, address: int, count: int, slave: int) -> list[int]:
-    response = client.read_input_registers(address=address, count=count, slave=slave)
+    # pymodbus 3.12 uses `device_id` kwarg (older versions used `slave`/`unit`)
+    response = client.read_input_registers(address=address, count=count, device_id=slave)
     if response.isError():
         raise RuntimeError(f"read_input_registers failed at {address} ({response})")
     return response.registers
 
 
 def _read_holding(client: Any, address: int, count: int, slave: int) -> list[int]:
-    response = client.read_holding_registers(address=address, count=count, slave=slave)
+    response = client.read_holding_registers(address=address, count=count, device_id=slave)
     if response.isError():
         raise RuntimeError(f"read_holding_registers failed at {address} ({response})")
     return response.registers
 
 
 def _write_holding(client: Any, address: int, values: list[int], slave: int) -> None:
-    response = client.write_registers(address=address, values=values, slave=slave)
+    response = client.write_registers(address=address, values=values, device_id=slave)
     if response.isError():
         raise RuntimeError(f"write_registers failed at {address} ({response})")
 
@@ -91,9 +92,21 @@ def _parse_enum(enum_cls: type, text: str):
 
 
 def _list_candidate_ports() -> list[str]:
+    """Return likely serial ports on this machine (Windows + POSIX)."""
     candidates: list[str] = []
-    for pattern in ("/dev/ttyUSB*", "/dev/ttyACM*", "/dev/serial/by-id/*"):
-        candidates.extend(sorted(glob.glob(pattern)))
+    # Prefer pyserial enumeration (works on Windows)
+    try:
+        from serial.tools import list_ports
+
+        candidates = [port.device for port in list_ports.comports()]
+    except Exception:
+        candidates = []
+
+    # Fallback globbing for POSIX if list_ports missing/empty
+    if not candidates:
+        for pattern in ("/dev/ttyUSB*", "/dev/ttyACM*", "/dev/serial/by-id/*"):
+            candidates.extend(sorted(glob.glob(pattern)))
+
     return candidates
 
 

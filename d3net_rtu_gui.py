@@ -32,7 +32,7 @@ class D3netGui(tk.Tk):
         frame = ttk.LabelFrame(self, text="Serial Settings")
         frame.pack(fill="x", padx=8, pady=8)
 
-        self.port_var = tk.StringVar(value="/dev/ttyUSB0")
+        self.port_var = tk.StringVar(value="")
         self.baud_var = tk.IntVar(value=9600)
         self.byte_var = tk.IntVar(value=8)
         self.parity_var = tk.StringVar(value="E")
@@ -40,8 +40,10 @@ class D3netGui(tk.Tk):
         self.timeout_var = tk.DoubleVar(value=1.0)
         self.slave_var = tk.IntVar(value=1)
 
+        self.port_combo = ttk.Combobox(frame, textvariable=self.port_var, width=22, state="readonly")
+
         fields = [
-            ("Port", ttk.Entry(frame, textvariable=self.port_var, width=22)),
+            ("Port", self.port_combo),
             ("Baud", ttk.Entry(frame, textvariable=self.baud_var, width=8)),
             ("Bytes", ttk.Combobox(frame, textvariable=self.byte_var, values=[7, 8], width=5, state="readonly")),
             ("Parity", ttk.Combobox(frame, textvariable=self.parity_var, values=["N", "E", "O"], width=5, state="readonly")),
@@ -54,7 +56,10 @@ class D3netGui(tk.Tk):
             ttk.Label(frame, text=label).grid(row=0, column=idx * 2, padx=(6, 2), pady=6, sticky="w")
             widget.grid(row=0, column=idx * 2 + 1, padx=(0, 6), pady=6, sticky="w")
 
-        ttk.Button(frame, text="List Ports", command=self.on_ports).grid(row=0, column=len(fields) * 2, padx=8)
+        ttk.Button(frame, text="Refresh Ports", command=self.on_ports).grid(row=0, column=len(fields) * 2, padx=8)
+
+        # initial populate
+        self.on_ports()
 
     def _make_tabs(self) -> None:
         self.tabs = ttk.Notebook(self)
@@ -220,7 +225,8 @@ class D3netGui(tk.Tk):
                 worker()
             except Exception as exc:  # noqa: BLE001
                 self._log(f"ERROR: {exc}")
-                self.after(0, lambda: messagebox.showerror("Error", str(exc)))
+                # bind exc as default to avoid late-binding NameError in Tk callbacks
+                self.after(0, lambda e=exc: messagebox.showerror("Error", str(e)))
 
         threading.Thread(target=wrapped, daemon=True).start()
 
@@ -235,11 +241,17 @@ class D3netGui(tk.Tk):
 
     def on_ports(self) -> None:
         ports = rtu._list_candidate_ports()
+
         if ports:
+            self.port_combo["values"] = ports
+            if not self.port_var.get():
+                self.port_combo.current(0)
+
             self._log("Detected serial ports:")
             for port in ports:
                 self._log(f"- {port}")
         else:
+            self.port_combo["values"] = []
             self._log("No serial ports detected. Try entering COMx or /dev/ttyUSBx manually.")
 
     def on_scan(self) -> None:
