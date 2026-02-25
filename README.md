@@ -24,6 +24,118 @@ After rebooting Home Assistant, this integration can be configured through the i
 
 Communication details are based on the [Daikin Design Guide Modbus Interface DIII](https://www.daikin-ce.com/content/dam/document-library/Installer-reference-guide/ac/vrv/ekmbdxb/EKMBDXB_Design%20guide_4PEN642495-1A_English.pdf).
 
+## Direct RS485 CLI Tool
+
+This repo now includes `d3net_rtu_tool.py`, a standalone Python CLI for talking directly to a DTA116A51 through a USB-RS485 adapter.
+
+### Install dependency
+
+```bash
+pip install pymodbus pyserial
+```
+
+### Typical workflow
+
+0. Find your serial device first:
+
+```bash
+python d3net_rtu_tool.py ports
+```
+
+1. Scan for indoor units:
+
+```bash
+python d3net_rtu_tool.py --port /dev/ttyUSB0 scan --verbose
+```
+
+2. Read status for all discovered units:
+
+```bash
+python d3net_rtu_tool.py --port /dev/ttyUSB0 status --all
+```
+
+3. Show active errors/alarms/warnings:
+
+```bash
+python d3net_rtu_tool.py --port /dev/ttyUSB0 errors --all
+```
+
+4. Control a unit (example: unit index `3`):
+
+```bash
+python d3net_rtu_tool.py --port /dev/ttyUSB0 control --unit 3 --power on --mode cool --setpoint 23.0 --fan-speed medium
+```
+
+5. Watch one unit and save JSONL logs:
+
+```bash
+python d3net_rtu_tool.py --port /dev/ttyUSB0 watch --unit 3 --interval 5 --duration 300 --out ./logs/unit3.jsonl
+```
+
+Run full help:
+
+```bash
+python d3net_rtu_tool.py --help
+```
+
+
+### USB-RS485 adapter notes (FT232RL modules)
+
+Your FT232RL USB-RS485 adapter type is compatible with this tool.
+
+- Connect adapter `A/+` to DTA `D1/+` and adapter `B/-` to DTA `D0/-` (naming can vary by board, keep polarity consistent).
+- If scanning fails, swap A/B once (some sellers label terminals in reverse).
+- DTA defaults are typically `9600`, `8`, `E`, `1`, slave `1`.
+- Linux users may need serial permission (`dialout` group).
+
+Example with explicit serial settings:
+
+```bash
+python d3net_rtu_tool.py --port /dev/ttyUSB0 --baudrate 9600 --bytesize 8 --parity E --stopbits 1 --slave 1 scan --verbose
+```
+
+### Desktop UI (GUI)
+
+If you prefer a UI instead of CLI, run:
+
+```bash
+python d3net_rtu_gui.py
+```
+
+If you are on Windows, run from a Command Prompt in the folder containing **both** files:
+
+```bat
+cd C:\path\to\d3net
+py d3net_rtu_gui.py
+```
+
+If you see `ModuleNotFoundError: No module named 'd3net_rtu_tool'`, copy `d3net_rtu_tool.py` into the same folder as `d3net_rtu_gui.py`.
+
+`d3net_rtu_tool.py` now has a built-in protocol fallback, so you do **not** need the `custom_components/daikin_d3net/d3net` package when running the scripts standalone.
+
+The UI includes:
+
+- serial setup and port discovery
+- unit scan
+- status reads
+- error/alert reads
+- control writes (power/mode/setpoint/fan/filter reset)
+- live watch/logging with optional JSONL output file
+
+### Build executable
+
+This repository includes `build_executable.sh` to package the GUI into a standalone executable using PyInstaller:
+
+```bash
+./build_executable.sh
+```
+
+Output binary will be created at:
+
+```bash
+dist/d3net_rtu_gui
+```
+
 ## Screens
 
 ![Integration](/images/integration.png)
