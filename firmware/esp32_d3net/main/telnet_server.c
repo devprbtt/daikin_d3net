@@ -15,11 +15,21 @@ static const char *TAG = "telnet_server";
 typedef struct {
     app_context_t *app;
     int clients[4];
+    struct {
+        char line[160];
+        uint32_t seq;
+    } logs[128];
+    size_t log_head;
+    size_t log_count;
+    uint32_t log_seq;
 } telnet_ctx_t;
 
 static telnet_ctx_t s_telnet = {
     .app = NULL,
     .clients = {-1, -1, -1, -1},
+    .log_head = 0,
+    .log_count = 0,
+    .log_seq = 0,
 };
 
 static void telnet_broadcast(const char *line, size_t len) {
@@ -52,7 +62,34 @@ void telnet_server_logf(const char *fmt, ...) {
     }
     buf[len++] = '\r';
     buf[len++] = '\n';
+    // log ring buffer
+    s_telnet.log_seq++;
+    size_t slot = (s_telnet.log_head + s_telnet.log_count) % (sizeof(s_telnet.logs) / sizeof(s_telnet.logs[0]));
+    if (s_telnet.log_count == sizeof(s_telnet.logs) / sizeof(s_telnet.logs[0])) {
+        s_telnet.log_head = (s_telnet.log_head + 1U) % (sizeof(s_telnet.logs) / sizeof(s_telnet.logs[0]));
+    } else {
+        s_telnet.log_count++;
+    }
+    memset(s_telnet.logs[slot].line, 0, sizeof(s_telnet.logs[slot].line));
+    memcpy(s_telnet.logs[slot].line, buf, len < sizeof(s_telnet.logs[slot].line) ? len : sizeof(s_telnet.logs[slot].line) - 1U);
+    s_telnet.logs[slot].seq = s_telnet.log_seq;
+
     telnet_broadcast(buf, len);
+}
+
+size_t telnet_server_get_logs(uint32_t since_seq, telnet_log_line_t *out, size_t max_lines) {
+    size_t written = 0;
+    for (size_t i = 0; i < s_telnet.log_count && written < max_lines; i++) {
+        size_t idx = (s_telnet.log_head + i) % (sizeof(s_telnet.logs) / sizeof(s_telnet.logs[0]));
+        if (s_telnet.logs[idx].seq <= since_seq) {
+            continue;
+        }
+        strncpy(out[written].line, s_telnet.logs[idx].line, sizeof(out[written].line) - 1U);
+        out[written].line[sizeof(out[written].line) - 1U] = '\0';
+        out[written].seq = s_telnet.logs[idx].seq;
+        written++;
+    }
+    return written;
 }
 
 static void telnet_status_task(void *arg) {

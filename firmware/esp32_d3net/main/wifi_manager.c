@@ -14,6 +14,19 @@ static const char *TAG = "wifi_manager";
 
 static bool s_sta_connected = false;
 static esp_netif_t *s_netif_sta = NULL;
+static TaskHandle_t s_reconnect_task = NULL;
+static bool s_sta_cfg_set = false;
+
+static void wifi_reconnect_task(void *arg) {
+    (void)arg;
+    while (true) {
+        if (s_sta_cfg_set && !s_sta_connected) {
+            ESP_LOGW(TAG, "STA not connected, retrying connect");
+            esp_wifi_connect();
+        }
+        vTaskDelay(pdMS_TO_TICKS(5000));
+    }
+}
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     (void)arg;
@@ -87,6 +100,9 @@ esp_err_t wifi_manager_start_apsta(const char *ap_ssid, const char *ap_password)
         return err;
     }
     ESP_LOGI(TAG, "AP started: ssid=%s", ap_ssid);
+    if (s_reconnect_task == NULL) {
+        xTaskCreate(wifi_reconnect_task, "wifi_reconnect", 2048, NULL, 4, &s_reconnect_task);
+    }
     return ESP_OK;
 }
 
@@ -110,6 +126,7 @@ esp_err_t wifi_manager_connect_sta(const char *ssid, const char *password) {
     if (err != ESP_OK) {
         return err;
     }
+    s_sta_cfg_set = true;
     return esp_wifi_connect();
 }
 

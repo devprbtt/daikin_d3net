@@ -125,12 +125,13 @@ void app_main(void) {
         .rx_pin = 16,
         .de_pin = 4,
         .re_pin = 5,
-        .baud_rate = 9600,
+        // Match field install settings verified against DTA116A51: 19200 8N2 slave 1
+        .baud_rate = 19200,
         .data_bits = 8,
-        .stop_bits = 1,
-        .parity = 'E',
+        .stop_bits = 2,
+        .parity = 'N',
         .slave_id = 1,
-        .timeout_ms = 1200,
+        .timeout_ms = 3000,  // generous to tolerate slow responses
     };
     err = modbus_rtu_init(&transport->rtu, &rtu_cfg);
     if (err != ESP_OK) {

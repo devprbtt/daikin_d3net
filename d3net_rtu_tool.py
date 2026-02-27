@@ -8,6 +8,7 @@ import glob
 import json
 import sys
 import time
+import traceback
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +17,8 @@ from typing import Any, Iterable
 REPO_ROOT = Path(__file__).resolve().parent
 D3NET_PYTHON_LIB = REPO_ROOT / "custom_components" / "daikin_d3net"
 if str(D3NET_PYTHON_LIB) not in sys.path:
-    sys.path.insert(0, str(D3NET_PYTHON_LIB))
+    # Append instead of prepend to avoid shadowing stdlib modules like `select`
+    sys.path.append(str(D3NET_PYTHON_LIB))
 
 from d3net.const import D3netFanDirection, D3netFanSpeed, D3netOperationMode
 from d3net.encoding import SystemStatus, UnitCapability, UnitError, UnitHolding, UnitStatus
@@ -427,6 +429,7 @@ def main() -> int:
         return 130
     except Exception as exc:  # noqa: BLE001 - single CLI error path
         print(f"ERROR: {exc}", file=sys.stderr)
+        traceback.print_exc()
         if "pymodbus" in str(exc):
             print("Install dependency with: pip install pymodbus pyserial", file=sys.stderr)
         return 1

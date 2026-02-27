@@ -50,11 +50,11 @@ Default pin mapping in `main.c`:
 
 If your board ties `RE` and `DE` together, either wire both to one GPIO and set both pins to that GPIO in `rtu_cfg`, or set `re_pin = -1` and wire `RE` low permanently.
 
-Default serial settings in `main.c`:
-- baud: 9600
+Default serial settings in `main.c` (tuned to the DTA116A51 setup we validated):
+- baud: 19200
 - data bits: 8
-- parity: Even
-- stop bits: 1
+- parity: None
+- stop bits: 2
 - slave ID: 1
 
 Adjust these values in `modbus_rtu_config_t rtu_cfg` in `main/main.c` for your hardware.

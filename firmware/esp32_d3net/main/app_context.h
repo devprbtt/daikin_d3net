@@ -25,6 +25,8 @@ typedef struct {
     char sta_ssid[33];
     char sta_password[65];
     bool sta_configured;
+    uint64_t registered_mask;
+    char registered_ids[D3NET_MAX_UNITS][6];
 } app_config_t;
 
 typedef struct {

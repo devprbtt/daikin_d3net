@@ -39,6 +39,15 @@ esp_err_t config_store_load(app_config_t *cfg) {
     if (err == ESP_OK) {
         cfg->sta_configured = cfg->sta_ssid[0] != '\0';
     }
+
+    uint64_t mask = 0;
+    size_t ids_len = sizeof(cfg->registered_ids);
+    if (nvs_get_u64(nvs, "reg_mask", &mask) == ESP_OK) {
+        cfg->registered_mask = mask;
+    }
+    if (nvs_get_blob(nvs, "reg_ids", cfg->registered_ids, &ids_len) != ESP_OK || ids_len != sizeof(cfg->registered_ids)) {
+        memset(cfg->registered_ids, 0, sizeof(cfg->registered_ids));
+    }
     nvs_close(nvs);
     return err;
 }
@@ -57,6 +66,12 @@ esp_err_t config_store_save(const app_config_t *cfg) {
     err = nvs_set_str(nvs, "sta_ssid", cfg->sta_ssid);
     if (err == ESP_OK) {
         err = nvs_set_str(nvs, "sta_pass", cfg->sta_password);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u64(nvs, "reg_mask", cfg->registered_mask);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_blob(nvs, "reg_ids", cfg->registered_ids, sizeof(cfg->registered_ids));
     }
     if (err == ESP_OK) {
         err = nvs_commit(nvs);

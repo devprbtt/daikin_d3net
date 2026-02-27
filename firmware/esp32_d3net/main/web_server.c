@@ -18,34 +18,77 @@
 
 static const char *TAG = "web_server";
 
+static bool reg_is_set(const app_context_t *app, uint8_t index) {
+    if (index >= D3NET_MAX_UNITS) {
+        return false;
+    }
+    return (app->config.registered_mask & (1ULL << index)) != 0ULL;
+}
+
+static void reg_set(app_context_t *app, uint8_t index, bool on, const char *unit_id) {
+    if (index >= D3NET_MAX_UNITS) {
+        return;
+    }
+    if (on) {
+        app->config.registered_mask |= (1ULL << index);
+        if (unit_id != NULL) {
+            strncpy(app->config.registered_ids[index], unit_id, sizeof(app->config.registered_ids[index]) - 1U);
+        }
+    } else {
+        app->config.registered_mask &= ~(1ULL << index);
+        memset(app->config.registered_ids[index], 0, sizeof(app->config.registered_ids[index]));
+    }
+}
+
 static const char *INDEX_HTML =
     "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>D3Net ESP32</title><style>body{font-family:Verdana,sans-serif;background:#f4f7fb;color:#112;padding:16px}"
     "h2{margin:0 0 8px}.card{background:#fff;border-radius:12px;padding:12px;margin:10px 0;box-shadow:0 2px 8px rgba(0,0,0,.08)}"
-    "button{padding:8px 12px;margin:4px}input,select{padding:8px;margin:4px;width:100%}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}"
-    ".meter{width:100%;height:16px;background:#ddd;border-radius:8px;overflow:hidden}.bar{height:16px;background:#25a16b;width:0%}</style></head><body>"
+    "button{padding:8px 12px;margin:4px}input,select,textarea{padding:8px;margin:4px;width:100%;box-sizing:border-box}"
+    ".row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.badge{display:inline-block;padding:4px 8px;border-radius:10px;font-size:12px}"
+    ".on{background:#d6f5e3;color:#155724}.off{background:#fde0e0;color:#7b1c1c}.meter{width:100%;height:12px;background:#ddd;border-radius:8px;overflow:hidden}"
+    ".bar{height:12px;background:#25a16b;width:0%}.term{background:#000;color:#0f0;font-family:monospace;height:200px;overflow:auto;padding:8px;border-radius:8px}"
+    "pre{background:#f1f3f8;padding:8px;border-radius:8px;overflow:auto}</style></head><body>"
     "<h2>Daikin D3Net Controller</h2>"
     "<div class='card'><b>Wi-Fi</b><div id='wifi_status'>loading...</div><button onclick='scanWifi()'>Scan</button>"
     "<select id='ssid_select' onchange='ssid.value=this.value'><option value=''>Select scanned AP</option></select>"
     "<input id='ssid' placeholder='SSID'><input id='pass' placeholder='Password' type='password'><button onclick='connectWifi()'>Connect</button></div>"
     "<div class='card'><b>OTA Update</b><input id='fw' type='file'><button onclick='uploadFw()'>Upload</button>"
     "<div class='meter'><div id='ota_bar' class='bar'></div></div><div id='ota_status'>idle</div></div>"
-    "<div class='card'><b>HVAC Units</b><button onclick='discover()'>Discover</button><div id='hvacs'></div></div>"
+    "<div class='card'><b>Discovery & Registry</b><button onclick='discover()'>Scan Units</button> <button onclick='loadRegistry()'>Refresh Registry</button><div id='registry'></div></div>"
+    "<div class='card'><b>Terminal</b><div class='term' id='term'></div></div>"
     "<script>"
+    "const modes=[[0,'FAN'],[1,'HEAT'],[2,'COOL'],[3,'AUTO'],[4,'VENT'],[7,'DRY']];"
+    "const fanSpeeds=[[0,'AUTO'],[1,'LOW'],[2,'LOW_MED'],[3,'MED'],[4,'HI_MED'],[5,'HIGH']];"
+    "const fanDirs=[[0,'P0'],[1,'P1'],[2,'P2'],[3,'P3'],[4,'P4'],[6,'STOP'],[7,'SWING']];"
+    "let logSeq=0;"
+    "function badge(on){return `<span class='badge ${on?'on':'off'}'>${on?'ONLINE':'OFFLINE'}</span>`}"
     "async function j(u,o){let r=await fetch(u,o);return r.json()}"
     "async function refresh(){let s=await j('/api/status');document.getElementById('wifi_status').innerText=`STA:${s.wifi.connected?'connected':'disconnected'} ${s.wifi.ip||''}`;"
     "document.getElementById('ota_status').innerText=s.ota.message;let p=s.ota.total_bytes?Math.floor((100*s.ota.bytes_received)/s.ota.total_bytes):0;"
-    "document.getElementById('ota_bar').style.width=p+'%';let h=await j('/api/hvac');renderHvacs(h.units)}"
-    "function renderHvacs(units){let h='';for(let u of units){h+=`<div class='card'><b>${u.unit_id}</b> mode=${u.mode} power=${u.power} cur=${u.temp_current} set=${u.temp_setpoint}"
-    "<div class='row'><button onclick=\"cmd(${u.index},'power',1)\">ON</button><button onclick=\"cmd(${u.index},'power',0)\">OFF</button></div>"
-    "<div class='row'><input id='sp_${u.index}' placeholder='Setpoint C'><button onclick=\"setpoint(${u.index})\">Set</button></div></div>`;} document.getElementById('hvacs').innerHTML=h||'No units';}"
+    "document.getElementById('ota_bar').style.width=p+'%';loadRegistry();}"
+    "function opt(list){return list.map(([v,l])=>`<option value='${v}'>${l}</option>`).join('')}"
+    "function renderCard(u){const dis=!u.online;return `<div class='card'><div style='display:flex;justify-content:space-between;align-items:center'><b>${u.unit_id||'unit '+u.index}</b>${badge(u.online)}</div>"
+    `<div>Idx ${u.index} | Registered: ${u.registered?'yes':'no'} <button onclick=\"${u.registered?'unreg':'reg'}(${u.index})\">${u.registered?'Unregister':'Register'}</button></div>`
+    `<div>Power ${u.power?'ON':'OFF'} | Mode ${u.mode_name||u.mode} | Cur ${u.temp_current??'-'}°C | Set ${u.temp_setpoint??'-'}°C</div>`
+    `<div class='row'><select id='p_${u.index}' ${dis?'disabled':''} onchange='setPreview(${u.index})'><option value='1'>Power ON</option><option value='0'>Power OFF</option></select><input id='sp_${u.index}' type='number' step='0.5' placeholder='Setpoint °C' ${dis?'disabled':''} oninput='setPreview(${u.index})'></div>`
+    `<div class='row'><select id='m_${u.index}' ${dis?'disabled':''} onchange='setPreview(${u.index})'>${opt(modes)}</select><select id='fs_${u.index}' ${dis?'disabled':''} onchange='setPreview(${u.index})'>${opt(fanSpeeds)}</select></div>`
+    `<div class='row'><select id='fd_${u.index}' ${dis?'disabled':''} onchange='setPreview(${u.index})'>${opt(fanDirs)}</select><button ${dis?'disabled':''} onclick='sendCmd(${u.index})'>Send</button></div>`
+    `<div><button ${dis?'disabled':''} onclick='filterReset(${u.index})'>Filter Reset</button></div>`
+    `<pre id='json_${u.index}'></pre></div>`}"
+    "async function loadRegistry(){let r=await j('/api/registry');let h='';for(let u of r.units){h+=renderCard(u);setPreview(u.index);}document.getElementById('registry').innerHTML=h||'No units';}"
     "async function scanWifi(){let r=await j('/api/wifi/scan');let s=document.getElementById('ssid_select');s.innerHTML='';if(!r.items||!r.items.length){let o=document.createElement('option');o.value='';o.text='No APs found';s.appendChild(o);return;}let p=document.createElement('option');p.value='';p.text='Select scanned AP';s.appendChild(p);for(let ap of r.items){let o=document.createElement('option');o.value=ap.ssid;o.text=`${ap.ssid} (RSSI ${ap.rssi})`;s.appendChild(o);}}"
     "async function connectWifi(){let selected=document.getElementById('ssid_select').value;let chosen=ssid.value||selected;await fetch('/api/wifi/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:chosen,password:pass.value})});setTimeout(refresh,1000)}"
-    "async function discover(){await fetch('/api/discover',{method:'POST'});setTimeout(refresh,500)}"
-    "async function cmd(i,c,v){await fetch('/api/hvac/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i,cmd:c,value:v})});setTimeout(refresh,300)}"
-    "async function setpoint(i){let v=parseFloat(document.getElementById('sp_'+i).value);await fetch('/api/hvac/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i,cmd:'setpoint',value:v})});setTimeout(refresh,300)}"
+    "async function discover(){await fetch('/api/discover',{method:'POST'});setTimeout(loadRegistry,500)}"
+    "async function reg(i){await fetch('/api/registry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i,action:'add'})});loadRegistry()}"
+    "async function unreg(i){await fetch('/api/registry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i,action:'remove'})});loadRegistry()}"
+    "function buildPayload(i){return {index:i,cmd:'composite',power:parseInt(document.getElementById('p_'+i).value),mode:parseInt(document.getElementById('m_'+i).value),setpoint:parseFloat(document.getElementById('sp_'+i).value),fan_speed:parseInt(document.getElementById('fs_'+i).value),fan_dir:parseInt(document.getElementById('fd_'+i).value)}}"
+    "function setPreview(i){let p=buildPayload(i);delete p.cmd;document.getElementById('json_'+i).innerText=JSON.stringify(p,null,2)}"
+    "async function sendCmd(i){let p=buildPayload(i);let body=[{cmd:'power',value:p.power},{cmd:'mode',value:p.mode},{cmd:'setpoint',value:p.setpoint},{cmd:'fan_speed',value:p.fan_speed},{cmd:'fan_dir',value:p.fan_dir}];document.getElementById('json_'+i).innerText=JSON.stringify(body,null,2);for (let c of body){if(isNaN(c.value)) continue;await fetch('/api/hvac/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i,cmd:c.cmd,value:c.value})});}setTimeout(loadRegistry,400)}"
+    "async function filterReset(i){await fetch('/api/hvac/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i,cmd:'filter_reset'})});setTimeout(loadRegistry,400)}"
     "async function uploadFw(){let f=document.getElementById('fw').files[0];if(!f)return;await fetch('/api/ota',{method:'POST',body:f});setTimeout(refresh,500)}"
-    "setInterval(refresh,2000);refresh();"
+    "async function pollLogs(){let r=await j(`/api/logs?since=${logSeq}`);logSeq=r.latest||logSeq;let t=document.getElementById('term');for(let ln of r.lines){t.innerText+=ln.text;};t.scrollTop=t.scrollHeight;}"
+    "setInterval(()=>{loadRegistry();pollLogs();},3000);refresh();pollLogs();"
     "</script></body></html>";
 
 static esp_err_t http_reply_json(httpd_req_t *req, cJSON *root) {
@@ -250,6 +293,7 @@ static esp_err_t handle_hvac_cmd_post(httpd_req_t *req) {
     }
 
     esp_err_t err = ESP_FAIL;
+    const char *cmd_text = cmd->valuestring;
     if (xSemaphoreTake(app->gateway_lock, pdMS_TO_TICKS(5000)) == pdTRUE) {
         d3net_unit_t *u = &app->gateway.units[index];
         if (!u->present) {
@@ -280,8 +324,143 @@ static esp_err_t handle_hvac_cmd_post(httpd_req_t *req) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "command failed");
         return err;
     }
-    telnet_server_logf("hvac command ok");
+    telnet_server_logf("hvac cmd idx=%d %s", index, cmd_text);
     return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
+static esp_err_t handle_registry_get(httpd_req_t *req) {
+    app_context_t *app = (app_context_t *)req->user_ctx;
+    cJSON *root = cJSON_CreateObject();
+    cJSON *arr = cJSON_CreateArray();
+
+    bool present_map[D3NET_MAX_UNITS] = {0};
+
+    if (xSemaphoreTake(app->gateway_lock, pdMS_TO_TICKS(2000)) == pdTRUE) {
+        for (uint8_t i = 0; i < D3NET_MAX_UNITS; i++) {
+            d3net_unit_t *u = &app->gateway.units[i];
+            if (!u->present) {
+                continue;
+            }
+            present_map[i] = true;
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddNumberToObject(item, "index", u->index);
+            cJSON_AddStringToObject(item, "unit_id", u->unit_id);
+            cJSON_AddBoolToObject(item, "registered", reg_is_set(app, i));
+            cJSON_AddBoolToObject(item, "online", true);
+            cJSON_AddBoolToObject(item, "power", d3net_status_power_get(&u->status));
+            int mode = d3net_status_oper_mode_get(&u->status);
+            cJSON_AddNumberToObject(item, "mode", mode);
+            cJSON_AddStringToObject(item, "mode_name", "");
+            cJSON_AddNumberToObject(item, "temp_current", d3net_status_temp_current_get(&u->status));
+            cJSON_AddNumberToObject(item, "temp_setpoint", d3net_status_temp_setpoint_get(&u->status));
+            cJSON_AddItemToArray(arr, item);
+        }
+        xSemaphoreGive(app->gateway_lock);
+    }
+
+    for (uint8_t i = 0; i < D3NET_MAX_UNITS; i++) {
+        if (!reg_is_set(app, i)) {
+            continue;
+        }
+        if (present_map[i]) {
+            continue;
+        }
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddNumberToObject(item, "index", i);
+        cJSON_AddStringToObject(item, "unit_id", app->config.registered_ids[i]);
+        cJSON_AddBoolToObject(item, "registered", true);
+        cJSON_AddBoolToObject(item, "online", false);
+        cJSON_AddItemToArray(arr, item);
+    }
+
+    cJSON_AddItemToObject(root, "units", arr);
+    return http_reply_json(req, root);
+}
+
+static esp_err_t handle_registry_post(httpd_req_t *req) {
+    app_context_t *app = (app_context_t *)req->user_ctx;
+    char *body = NULL;
+    size_t body_len = 0;
+    if (recv_body(req, &body, &body_len) != ESP_OK || body == NULL) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body");
+        return ESP_FAIL;
+    }
+    cJSON *json = cJSON_ParseWithLength(body, body_len);
+    free(body);
+    if (json == NULL) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "json");
+        return ESP_FAIL;
+    }
+    cJSON *idx = cJSON_GetObjectItem(json, "index");
+    cJSON *action = cJSON_GetObjectItem(json, "action");
+    if (!cJSON_IsNumber(idx) || !cJSON_IsString(action)) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "fields");
+        return ESP_FAIL;
+    }
+    int index = idx->valueint;
+    if (index < 0 || index >= D3NET_MAX_UNITS) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "index");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = ESP_OK;
+    if (strcmp(action->valuestring, "add") == 0) {
+        if (xSemaphoreTake(app->gateway_lock, pdMS_TO_TICKS(2000)) == pdTRUE) {
+            d3net_unit_t *u = &app->gateway.units[index];
+            if (!u->present) {
+                err = ESP_ERR_NOT_FOUND;
+            } else {
+                reg_set(app, index, true, u->unit_id);
+                config_store_save(&app->config);
+                telnet_server_logf("registered unit idx=%d id=%s", index, u->unit_id);
+            }
+            xSemaphoreGive(app->gateway_lock);
+        }
+    } else if (strcmp(action->valuestring, "remove") == 0) {
+        reg_set(app, index, false, NULL);
+        config_store_save(&app->config);
+        telnet_server_logf("unregistered unit idx=%d", index);
+    } else {
+        err = ESP_ERR_INVALID_ARG;
+    }
+    cJSON_Delete(json);
+
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "registry");
+        return err;
+    }
+    return httpd_resp_sendstr(req, "{\"ok\":true}");
+}
+
+static esp_err_t handle_logs_get(httpd_req_t *req) {
+    char query[64] = {0};
+    uint32_t since = 0;
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char buf[16] = {0};
+        if (httpd_query_key_value(query, "since", buf, sizeof(buf)) == ESP_OK) {
+            since = (uint32_t)strtoul(buf, NULL, 10);
+        }
+    }
+    telnet_log_line_t lines[64];
+    size_t count = telnet_server_get_logs(since, lines, 64);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON *arr = cJSON_CreateArray();
+    uint32_t latest = since;
+    for (size_t i = 0; i < count; i++) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddNumberToObject(item, "seq", lines[i].seq);
+        cJSON_AddStringToObject(item, "text", lines[i].line);
+        cJSON_AddItemToArray(arr, item);
+        if (lines[i].seq > latest) {
+            latest = lines[i].seq;
+        }
+    }
+    cJSON_AddItemToObject(root, "lines", arr);
+    cJSON_AddNumberToObject(root, "latest", latest);
+    return http_reply_json(req, root);
 }
 
 static esp_err_t handle_ota_post(httpd_req_t *req) {
@@ -375,6 +554,9 @@ esp_err_t web_server_start(app_context_t *app, httpd_handle_t *out_handle) {
         {.uri = "/api/hvac", .method = HTTP_GET, .handler = handle_hvac_get, .user_ctx = app},
         {.uri = "/api/discover", .method = HTTP_POST, .handler = handle_discover_post, .user_ctx = app},
         {.uri = "/api/hvac/cmd", .method = HTTP_POST, .handler = handle_hvac_cmd_post, .user_ctx = app},
+        {.uri = "/api/registry", .method = HTTP_GET, .handler = handle_registry_get, .user_ctx = app},
+        {.uri = "/api/registry", .method = HTTP_POST, .handler = handle_registry_post, .user_ctx = app},
+        {.uri = "/api/logs", .method = HTTP_GET, .handler = handle_logs_get, .user_ctx = app},
         {.uri = "/api/ota", .method = HTTP_POST, .handler = handle_ota_post, .user_ctx = app},
     };
 
