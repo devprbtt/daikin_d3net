@@ -8,6 +8,7 @@
 #include "freertos/semphr.h"
 
 #include "d3net_gateway.h"
+#include "modbus_rtu.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,6 +28,7 @@ typedef struct {
     bool sta_configured;
     uint64_t registered_mask;
     char registered_ids[D3NET_MAX_UNITS][6];
+    modbus_rtu_config_t rtu_cfg;
 } app_config_t;
 
 typedef struct {

@@ -55,6 +55,14 @@ static const char *INDEX_HTML =
     "<input id='ssid' placeholder='SSID'><input id='pass' placeholder='Password' type='password'><button onclick='connectWifi()'>Connect</button></div>"
     "<div class='card'><b>OTA Update</b><input id='fw' type='file'><button onclick='uploadFw()'>Upload</button>"
     "<div class='meter'><div id='ota_bar' class='bar'></div></div><div id='ota_status'>idle</div></div>"
+    "<div class='card'><b>RS485 / Modbus RTU</b>"
+    "<div class='row'><input id='rtu_tx' type='number' placeholder='TX pin'><input id='rtu_rx' type='number' placeholder='RX pin'></div>"
+    "<div class='row'><input id='rtu_de' type='number' placeholder='DE pin'><input id='rtu_re' type='number' placeholder='RE pin'></div>"
+    "<div class='row'><input id='rtu_baud' type='number' placeholder='Baud'><select id='rtu_parity'><option value='N'>Parity None</option><option value='E'>Parity Even</option><option value='O'>Parity Odd</option></select></div>"
+    "<div class='row'><select id='rtu_stop'><option value='1'>Stop 1</option><option value='2'>Stop 2</option></select><select id='rtu_bits'><option value='8'>Data 8</option><option value='7'>Data 7</option></select></div>"
+    "<div class='row'><input id='rtu_slave' type='number' placeholder='Slave ID'><input id='rtu_timeout' type='number' placeholder='Timeout ms'></div>"
+    "<button onclick='saveRtu()'>Save & Reboot</button>"
+    "</div>"
     "<div class='card'><b>Discovery & Registry</b><button onclick='discover()'>Scan Units</button> <button onclick='loadRegistry()'>Refresh Registry</button><div id='registry'></div></div>"
     "<div class='card'><b>Terminal</b><div class='term' id='term'></div></div>"
     "<script>"
@@ -87,8 +95,10 @@ static const char *INDEX_HTML =
     "async function sendCmd(i){let p=buildPayload(i);let body=[{cmd:'power',value:p.power},{cmd:'mode',value:p.mode},{cmd:'setpoint',value:p.setpoint},{cmd:'fan_speed',value:p.fan_speed},{cmd:'fan_dir',value:p.fan_dir}];document.getElementById('json_'+i).innerText=JSON.stringify(body,null,2);for (let c of body){if(isNaN(c.value)) continue;await fetch('/api/hvac/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i,cmd:c.cmd,value:c.value})});}setTimeout(loadRegistry,400)}"
     "async function filterReset(i){await fetch('/api/hvac/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i,cmd:'filter_reset'})});setTimeout(loadRegistry,400)}"
     "async function uploadFw(){let f=document.getElementById('fw').files[0];if(!f)return;await fetch('/api/ota',{method:'POST',body:f});setTimeout(refresh,500)}"
+    "async function loadRtu(){let r=await j('/api/rtu');const m=(id,v)=>{let el=document.getElementById(id);if(el) el.value=v};m('rtu_tx',r.tx_pin);m('rtu_rx',r.rx_pin);m('rtu_de',r.de_pin);m('rtu_re',r.re_pin);m('rtu_baud',r.baud_rate);m('rtu_parity',r.parity);m('rtu_stop',r.stop_bits);m('rtu_bits',r.data_bits);m('rtu_slave',r.slave_id);m('rtu_timeout',r.timeout_ms);}"
+    "async function saveRtu(){let body={tx_pin:parseInt(rtu_tx.value),rx_pin:parseInt(rtu_rx.value),de_pin:parseInt(rtu_de.value),re_pin:parseInt(rtu_re.value),baud_rate:parseInt(rtu_baud.value),parity:rtu_parity.value,stop_bits:parseInt(rtu_stop.value),data_bits:parseInt(rtu_bits.value),slave_id:parseInt(rtu_slave.value),timeout_ms:parseInt(rtu_timeout.value)};await fetch('/api/rtu',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});alert('Saved. Device will reboot.');}"
     "async function pollLogs(){let r=await j(`/api/logs?since=${logSeq}`);logSeq=r.latest||logSeq;let t=document.getElementById('term');for(let ln of r.lines){t.innerText+=ln.text;};t.scrollTop=t.scrollHeight;}"
-    "setInterval(()=>{loadRegistry();pollLogs();},3000);refresh();pollLogs();"
+    "setInterval(()=>{loadRegistry();pollLogs();},3000);refresh();pollLogs();loadRtu();"
     "</script></body></html>";
 
 static esp_err_t http_reply_json(httpd_req_t *req, cJSON *root) {
@@ -463,6 +473,57 @@ static esp_err_t handle_logs_get(httpd_req_t *req) {
     return http_reply_json(req, root);
 }
 
+static esp_err_t handle_rtu_get(httpd_req_t *req) {
+    app_context_t *app = (app_context_t *)req->user_ctx;
+    cJSON *root = cJSON_CreateObject();
+    const modbus_rtu_config_t *cfg = &app->config.rtu_cfg;
+    cJSON_AddNumberToObject(root, "tx_pin", cfg->tx_pin);
+    cJSON_AddNumberToObject(root, "rx_pin", cfg->rx_pin);
+    cJSON_AddNumberToObject(root, "de_pin", cfg->de_pin);
+    cJSON_AddNumberToObject(root, "re_pin", cfg->re_pin);
+    cJSON_AddNumberToObject(root, "baud_rate", cfg->baud_rate);
+    cJSON_AddNumberToObject(root, "data_bits", cfg->data_bits);
+    cJSON_AddNumberToObject(root, "stop_bits", cfg->stop_bits);
+    cJSON_AddStringToObject(root, "parity", (char[]){cfg->parity, 0});
+    cJSON_AddNumberToObject(root, "slave_id", cfg->slave_id);
+    cJSON_AddNumberToObject(root, "timeout_ms", cfg->timeout_ms);
+    return http_reply_json(req, root);
+}
+
+static esp_err_t handle_rtu_post(httpd_req_t *req) {
+    app_context_t *app = (app_context_t *)req->user_ctx;
+    char *body = NULL;
+    size_t body_len = 0;
+    if (recv_body(req, &body, &body_len) != ESP_OK || body == NULL) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "body");
+        return ESP_FAIL;
+    }
+    cJSON *json = cJSON_ParseWithLength(body, body_len);
+    free(body);
+    if (json == NULL) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "json");
+        return ESP_FAIL;
+    }
+    modbus_rtu_config_t *cfg = &app->config.rtu_cfg;
+    cfg->tx_pin = cJSON_GetObjectItem(json, "tx_pin")->valueint;
+    cfg->rx_pin = cJSON_GetObjectItem(json, "rx_pin")->valueint;
+    cfg->de_pin = cJSON_GetObjectItem(json, "de_pin")->valueint;
+    cfg->re_pin = cJSON_GetObjectItem(json, "re_pin")->valueint;
+    cfg->baud_rate = cJSON_GetObjectItem(json, "baud_rate")->valueint;
+    cfg->data_bits = cJSON_GetObjectItem(json, "data_bits")->valueint;
+    cfg->stop_bits = cJSON_GetObjectItem(json, "stop_bits")->valueint;
+    cfg->parity = (char)cJSON_GetObjectItem(json, "parity")->valuestring[0];
+    cfg->slave_id = cJSON_GetObjectItem(json, "slave_id")->valueint;
+    cfg->timeout_ms = cJSON_GetObjectItem(json, "timeout_ms")->valueint;
+    cJSON_Delete(json);
+
+    config_store_save(&app->config);
+    httpd_resp_sendstr(req, "{\"ok\":true,\"reboot\":true}");
+    vTaskDelay(pdMS_TO_TICKS(800));
+    esp_restart();
+    return ESP_OK;
+}
+
 static esp_err_t handle_ota_post(httpd_req_t *req) {
     app_context_t *app = (app_context_t *)req->user_ctx;
     app->ota.active = true;
@@ -557,6 +618,8 @@ esp_err_t web_server_start(app_context_t *app, httpd_handle_t *out_handle) {
         {.uri = "/api/registry", .method = HTTP_GET, .handler = handle_registry_get, .user_ctx = app},
         {.uri = "/api/registry", .method = HTTP_POST, .handler = handle_registry_post, .user_ctx = app},
         {.uri = "/api/logs", .method = HTTP_GET, .handler = handle_logs_get, .user_ctx = app},
+        {.uri = "/api/rtu", .method = HTTP_GET, .handler = handle_rtu_get, .user_ctx = app},
+        {.uri = "/api/rtu", .method = HTTP_POST, .handler = handle_rtu_post, .user_ctx = app},
         {.uri = "/api/ota", .method = HTTP_POST, .handler = handle_ota_post, .user_ctx = app},
     };
 

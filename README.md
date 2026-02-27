@@ -125,6 +125,42 @@ Output binary will be created at:
 dist/d3net_rtu_gui
 ```
 
+## RNET Keypad/Gateway Sniffing Notes (Feb 2026)
+
+- Physical: RS‑485 on RNET A/B; 24 V on +/– (adapter must only touch A/B).
+- Serial: 19200 baud, 8N1, CRC‑16/CCITT‑FALSE over bytes after leading 0x02.
+
+Polls / address
+- 6‑byte poll: `02 <addr> 01 0e <crc_hi> <crc_lo>`; address is the second byte (e.g., 0x66 = 102).
+- Button frames themselves do not carry the address; they rely on the polled session.
+
+Button frames (23 bytes)  
+Format: `02 [dir] 12 0e P0 P1 P2 P3 ... CRC`  
+Direction: 0x80 keypad→gateway (PRESS), 0x00 gateway→keypad (RELEASE/ack).  
+Payload words that identify buttons:
+- BTN1: 00 00 03 00 or 01 00 03 00
+- BTN2: 00 00 0C 00 or 02 00 0C 00
+- BTN3: 00 00 30 00 or 04 00 30 00
+- BTN4: 00 00 C0 00 or 08 00 C0 00
+Variants with mid‑bytes changing (e.g., `... 00 00 00 00 00 01 00 ...`) show up around hold/double/LED activity—still being mapped.
+
+Other observed frames
+- 5‑byte bursts like `02 64 00 da e1` coincide with LED/status traffic.
+- Occasional 18‑byte frames (unmapped).
+
+Helper scripts (repo root)
+- `com_raw_live.py` — raw hex stream with timestamps.
+- `com_filter_view.py` — live view with poll suppression + per‑second stats.
+- `keypad_live_label.py` — live PRESS/RELEASE for BTN1–BTN4; OTHER payloads printed.
+- `keypad_live_counter.py` — BTN1 press counter/logger.
+- `keypad_capture_button1.py` — guided BTN1 capture window.
+- `keypad_capture_sequence.py` — guided capture buttons 1→4 sequentially.
+- `rnet_logger.py` — timed capture; `rnet_decode.py` — CRC framing/summary.
+
+Next mapping steps
+- Capture labeled press/hold/double sequences per button to lock down the OTHER variants.
+- Map the 5‑byte frames to LED/status once those actions are timestamped.
+
 ## Screens
 
 ![Integration](/images/integration.png)

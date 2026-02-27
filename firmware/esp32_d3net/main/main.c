@@ -119,20 +119,7 @@ void app_main(void) {
         return;
     }
 
-    modbus_rtu_config_t rtu_cfg = {
-        .uart_num = UART_NUM_1,
-        .tx_pin = 17,
-        .rx_pin = 16,
-        .de_pin = 4,
-        .re_pin = 5,
-        // Match field install settings verified against DTA116A51: 19200 8N2 slave 1
-        .baud_rate = 19200,
-        .data_bits = 8,
-        .stop_bits = 2,
-        .parity = 'N',
-        .slave_id = 1,
-        .timeout_ms = 3000,  // generous to tolerate slow responses
-    };
+    modbus_rtu_config_t rtu_cfg = s_app.config.rtu_cfg;
     err = modbus_rtu_init(&transport->rtu, &rtu_cfg);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "rtu init failed: %s", esp_err_to_name(err));
