@@ -127,6 +127,10 @@ dist/d3net_rtu_gui
 
 ## RNET Keypad/Gateway Sniffing Notes (Feb 2026)
 
+- Detailed Roehn Wizard protocol map from decompiled sources:
+  - [roehn_wizard_protocol_map.md](roehn_wizard_protocol_map.md)
+
+
 - Physical: RS‑485 on RNET A/B; 24 V on +/– (adapter must only touch A/B).
 - Serial: 19200 baud, 8N1, CRC‑16/CCITT‑FALSE over bytes after leading 0x02.
 
@@ -156,6 +160,35 @@ Helper scripts (repo root)
 - `keypad_capture_button1.py` — guided BTN1 capture window.
 - `keypad_capture_sequence.py` — guided capture buttons 1→4 sequentially.
 - `rnet_logger.py` — timed capture; `rnet_decode.py` — CRC framing/summary.
+
+Roehn discovery tool
+- roehn_discover.py - Roehn Wizard UDP processor discovery and module enumeration.
+
+Roehn discovery examples
+- Discover processors (broadcast on UDP 2006):
+  - python roehn_discover.py discover
+- Discover processors with unicast subnet sweep fallback:
+  - python roehn_discover.py discover --subnet 192.168.51.0/24
+- Discover with JSON output:
+  - python roehn_discover.py discover --json
+- Discover and save JSON to file:
+  - python roehn_discover.py discover --json --out .\logs\roehn_processors.json
+- Enumerate connected devices on one processor:
+  - python roehn_discover.py devices 192.168.51.30
+- Enumerate devices as JSON:
+  - python roehn_discover.py devices 192.168.51.30 --json
+- Identify module by serial (blink/beep):
+  - python roehn_discover.py identify 192.168.51.30 29:11:00:09:DB:4E
+- Identify module with beep disabled:
+  - python roehn_discover.py identify 192.168.51.30 29:11:00:09:DB:4E --no-beep
+- Query processor metadata (discovery + BIOS info):
+  - python roehn_discover.py processor-info 192.168.51.30
+- Query processor metadata with devices as JSON:
+  - python roehn_discover.py processor-info 192.168.51.30 --with-devices --json --out .\logs\roehn_processor_info_192.168.51.30.json
+- Enumerate devices and save JSON:
+  - python roehn_discover.py devices 192.168.51.30 --json --out .\logs\roehn_devices_192.168.51.30.json
+- Full scan (discover + device enumeration):
+  - python roehn_discover.py scan-all --subnet 192.168.51.0/24 --json --out .\logs\roehn_scan_all.json
 
 Next mapping steps
 - Capture labeled press/hold/double sequences per button to lock down the OTHER variants.
