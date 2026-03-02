@@ -11,7 +11,7 @@ DEFAULT_NAME = "Roehn Wizard"
 DEFAULT_PORT = 2006
 DEFAULT_SCAN_INTERVAL = 30
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.LIGHT, Platform.SWITCH, Platform.COVER]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.LIGHT, Platform.COVER]
 
 MANUFACTURER = "Roehn"
 MODEL = "Wizard Processor"

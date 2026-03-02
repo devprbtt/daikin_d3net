@@ -33,7 +33,7 @@ def configured_hosts(hass) -> set[str]:
 
 async def validate_input(hass, data: dict[str, Any]) -> dict[str, Any]:
     """Validate user input by checking processor responses."""
-    client = RoehnClient(host=data[CONF_HOST], port=data[CONF_PORT], timeout=1.0)
+    client = RoehnClient(host=data[CONF_HOST], port=data[CONF_PORT], timeout=2.5, command_timeout=3.0)
     processor = await hass.async_add_executor_job(client.query_processor_discovery_info)
     bios = await hass.async_add_executor_job(client.query_processor_bios_info)
     devices = await hass.async_add_executor_job(client.query_devices)

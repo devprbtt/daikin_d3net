@@ -250,6 +250,7 @@ class ModuleStatusSensor(RoehnSensorBase):
             module.model,
             module.extended_model,
             module.hsnet_id,
+            module.driver_info.model_base_name if module.driver_info else None,
         )
 
     @property
@@ -345,6 +346,7 @@ class KeypadButtonActionSensor(RoehnSensorBase):
             keypad_button.model,
             keypad_button.extended_model,
             keypad_button.hsnet_id,
+            keypad_button.keypad_info.model_base_name if keypad_button.keypad_info else None,
         )
 
     async def async_added_to_hass(self) -> None:
@@ -478,9 +480,9 @@ def _infer_keypad_button_count(device: DeviceInfo, resources: ResourcesIndex) ->
 
 
 def _resolve_control_address(device: DeviceInfo) -> int:
-    if 1 <= device.device_id <= 65534 and device.device_id != 255:
-        return device.device_id
-    return device.hsnet_id
+    if device.hsnet_id > 0:
+        return device.hsnet_id
+    return device.device_id
 
 
 def _find_device_by_control_address(devices: list[DeviceInfo], control_address: int) -> DeviceInfo | None:

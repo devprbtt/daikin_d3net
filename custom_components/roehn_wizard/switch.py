@@ -95,7 +95,19 @@ class RoehnRelaySwitch(CoordinatorEntity[RoehnCoordinator], SwitchEntity):
             description.model,
             description.extended_model,
             description.hsnet_id,
+            description.driver_info.model_base_name if description.driver_info else None,
         )
+        self._address = description.hsnet_id if description.hsnet_id > 0 else description.device_id
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self.coordinator.async_add_load_listener(self._handle_load_feedback))
+
+    @callback
+    def _handle_load_feedback(self, device_address: int, channel: int, level: int) -> None:
+        if device_address != self._address or channel != self.description.channel:
+            return
+        self.async_write_ha_state()
 
     @property
     def available(self) -> bool:
@@ -104,6 +116,9 @@ class RoehnRelaySwitch(CoordinatorEntity[RoehnCoordinator], SwitchEntity):
 
     @property
     def is_on(self) -> bool:
+        level = self.coordinator.get_load_level(self._address, self.description.channel)
+        if level is not None:
+            return level > 0
         return self._is_on
 
     @property
@@ -182,6 +197,6 @@ def _iter_relay_channels(driver_info: ModuleDriverInfo | None) -> list[int]:
 
 
 def _resolve_control_address(device: DeviceInfo) -> int:
-    if 1 <= device.device_id <= 65534 and device.device_id != 255:
-        return device.device_id
-    return device.hsnet_id
+    if device.hsnet_id > 0:
+        return device.hsnet_id
+    return device.device_id

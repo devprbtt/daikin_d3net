@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import socket
 import time
 
 HEADER = b"HSN_S-UDP"
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -206,6 +208,30 @@ class RoehnClient:
         self.timeout = timeout
         self.command_port = command_port
         self.command_timeout = timeout if command_timeout is None else command_timeout
+        self._accepted_source_ips = self._resolve_host_ips(host)
+
+    @staticmethod
+    def _resolve_host_ips(host: str) -> set[str]:
+        """Resolve configured host to accepted source IPs."""
+        ips: set[str] = set()
+        if not host:
+            return ips
+        ips.add(host)
+        try:
+            infos = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_DGRAM)
+        except OSError:
+            return ips
+        for info in infos:
+            sockaddr = info[4]
+            if isinstance(sockaddr, tuple) and sockaddr:
+                ips.add(str(sockaddr[0]))
+        return ips
+
+    def _is_expected_source(self, src_ip: str) -> bool:
+        """Return True if response source IP matches configured host/IP."""
+        if not self._accepted_source_ips:
+            return True
+        return src_ip in self._accepted_source_ips
 
     def query_processor_discovery_info(self, probes: int = 2) -> ProcessorInfo | None:
         packet = build_discover_packet()
@@ -220,7 +246,7 @@ class RoehnClient:
                         data, (src_ip, _) = sock.recvfrom(4096)
                     except socket.timeout:
                         break
-                    if src_ip != self.host:
+                    if not self._is_expected_source(src_ip):
                         continue
                     parsed = parse_processor_response(data, src_ip)
                     if parsed is not None:
@@ -242,7 +268,7 @@ class RoehnClient:
                         data, (src_ip, _) = sock.recvfrom(4096)
                     except socket.timeout:
                         break
-                    if src_ip != self.host:
+                    if not self._is_expected_source(src_ip):
                         continue
                     parsed = parse_bios_response(data)
                     if parsed is not None:
@@ -267,7 +293,7 @@ class RoehnClient:
                         data, (src_ip, _) = sock.recvfrom(8192)
                     except socket.timeout:
                         break
-                    if src_ip != self.host:
+                    if not self._is_expected_source(src_ip):
                         continue
                     parsed = parse_devices_response(data, src_ip)
                     if parsed is not None:
@@ -349,7 +375,17 @@ class RoehnClient:
         max_lines: int = 20,
     ) -> list[str]:
         """Send a telnet command and return received text lines."""
-        sock = socket.create_connection((self.host, self.command_port), timeout=max(0.05, self.command_timeout))
+        try:
+            sock = socket.create_connection((self.host, self.command_port), timeout=max(0.05, self.command_timeout))
+        except OSError as err:
+            _LOGGER.warning(
+                "Roehn telnet connect failed to %s:%s for command '%s': %s",
+                self.host,
+                self.command_port,
+                command,
+                err,
+            )
+            return []
         lines: list[str] = []
         try:
             sock.settimeout(max(0.05, response_timeout))
@@ -361,6 +397,9 @@ class RoehnClient:
                 try:
                     chunk = sock.recv(4096)
                 except socket.timeout:
+                    break
+                except OSError as err:
+                    _LOGGER.debug("Roehn telnet recv error for '%s': %s", command, err)
                     break
                 if not chunk:
                     break
@@ -374,6 +413,7 @@ class RoehnClient:
         finally:
             sock.close()
 
+        _LOGGER.debug("Roehn command '%s' -> %s", command, lines[:5])
         return lines
 
     @staticmethod

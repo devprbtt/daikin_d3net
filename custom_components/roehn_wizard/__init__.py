@@ -31,14 +31,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     port = entry.data[CONF_PORT]
     scan_interval = entry.data[CONF_SCAN_INTERVAL]
 
-    client = RoehnClient(host=host, port=port, timeout=1.0)
+    client = RoehnClient(host=host, port=port, timeout=2.5, command_timeout=3.0)
     coordinator = RoehnCoordinator(
         hass=hass,
         entry=entry,
         client=client,
         update_interval_seconds=scan_interval,
     )
-    resources = load_resources_index()
+    resources = await hass.async_add_executor_job(load_resources_index)
     images_url_base = ""
 
     try:
@@ -81,10 +81,11 @@ def module_device_info(
     model: str,
     ext_model: str,
     hsnet_id: int,
+    model_base_name: str | None = None,
 ) -> DeviceInfo:
     """Return device info for a module connected to the processor."""
-    base_name = ext_model or model or f"Module {serial_hex}"
-    module_name = f"{base_name} HSNET {hsnet_id}"
+    base_name = (model_base_name or "").strip() or ext_model or model or f"Module {serial_hex}"
+    module_name = f"{hsnet_id} {base_name}"
     return DeviceInfo(
         manufacturer=MANUFACTURER,
         model=module_name,
